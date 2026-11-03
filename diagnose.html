@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>라쿠텐 API 진단</title>
+<style>
+  body { margin:0; font-family:-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; color:#1f2328; background:#fff; font-size:15px; line-height:1.5; }
+  main { max-width:760px; margin:0 auto; padding:14px; }
+  h1 { font-size:1.15rem; margin:4px 0 10px; }
+  label { display:block; font-size:0.85rem; color:#59636e; margin:8px 0 2px; }
+  input { width:100%; padding:9px; border:1px solid #d0d7de; border-radius:8px; font:inherit; }
+  button { font:inherit; padding:10px 12px; border:none; border-radius:8px; background:#0969da; color:#fff; font-weight:600; margin:10px 6px 0 0; }
+  .box { border:1px solid #d0d7de; border-radius:10px; padding:10px 12px; margin:10px 0; background:#f6f8fa; }
+  .ok { color:#1a7f37; font-weight:700; }
+  .ng { color:#cf222e; font-weight:700; }
+  pre { white-space:pre-wrap; word-break:break-all; font-size:0.8rem; background:#fff; border:1px solid #d0d7de; border-radius:8px; padding:8px; margin:6px 0 0; max-height:220px; overflow:auto; }
+  .small { font-size:0.82rem; color:#59636e; }
+</style>
+</head>
+<body>
+<main>
+  <h1>라쿠텐 API 진단</h1>
+  <div class="small">현재 접속 주소(Referer 판단용): <span id="origin"></span></div>
+
+  <label>applicationId</label>
+  <input id="appId" autocomplete="off">
+  <label>accessKey</label>
+  <input id="accessKey" autocomplete="off">
+  <label>검색 키워드</label>
+  <input id="keyword" value="말차" autocomplete="off">
+
+  <button id="runBtn">진단 실행</button>
+  <div class="small" style="margin-top:8px">버튼 한 번으로 아래 4가지 호출을 차례로 보냅니다. 결과 상태와 라쿠텐 응답 원문을 그대로 보여줍니다.</div>
+
+  <div id="results"></div>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  $("origin").textContent = location.origin;
+
+  // 저장된 값이 있으면 불러오기 (이 주소 전용 저장소)
+  $("appId").value = localStorage.getItem("diag_appId") || "";
+  $("accessKey").value = localStorage.getItem("diag_accessKey") || "";
+
+  const TESTS = [
+    {
+      name: "1. 이치바 검색 2022 (applicationId + accessKey)",
+      url: (p) => "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20220601?" +
+        new URLSearchParams({ applicationId: p.appId, accessKey: p.accessKey, keyword: p.keyword, format: "json", formatVersion: "2", hits: "3" })
+    },
+    {
+      name: "2. 이치바 검색 2022 (accessKey 없이)",
+      url: (p) => "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20220601?" +
+        new URLSearchParams({ applicationId: p.appId, keyword: p.keyword, format: "json", formatVersion: "2", hits: "3" })
+    },
+    {
+      name: "3. 이치바 검색 2017 구버전 (applicationId만)",
+      url: (p) => "https://app.rakuten.co.jp/services/api/IchibaItem/Search/20170706?" +
+        new URLSearchParams({ applicationId: p.appId, keyword: p.keyword, format: "json", formatVersion: "2", hits: "3" })
+    },
+    {
+      name: "4. 이치바 검색 2022 (accessKey를 헤더로)",
+      url: (p) => "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20220601?" +
+        new URLSearchParams({ applicationId: p.appId, keyword: p.keyword, format: "json", formatVersion: "2", hits: "3" }),
+      headers: (p) => ({ Authorization: "Bearer " + p.accessKey })
+    }
+  ];
+
+  async function runOne(test, p) {
+    const box = document.createElement("div");
+    box.className = "box";
+    box.appendChild(Object.assign(document.createElement("div"), { textContent: test.name }));
+    const status = document.createElement("div");
+    status.textContent = "요청 중...";
+    box.appendChild(status);
+    $("results").appendChild(box);
+
+    try {
+      const headers = test.headers ? test.headers(p) : {};
+      const res = await fetch(test.url(p), { headers });
+      const text = await res.text();
+      let pretty = text;
+      try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch (e) {}
+      status.className = res.ok ? "ok" : "ng";
+      status.textContent = (res.ok ? "성공 " : "실패 ") + "HTTP " + res.status;
+      const pre = document.createElement("pre");
+      pre.textContent = pretty.slice(0, 1500);
+      box.appendChild(pre);
+    } catch (err) {
+      status.className = "ng";
+      status.textContent = "요청 자체가 실패함(네트워크 또는 차단): " + err.message;
+      const note = document.createElement("div");
+      note.className = "small";
+      note.textContent = "브라우저가 응답을 읽지 못했습니다. CORS 차단일 수 있습니다.";
+      box.appendChild(note);
+    }
+  }
+
+  $("runBtn").onclick = async () => {
+    const p = {
+      appId: $("appId").value.trim(),
+      accessKey: $("accessKey").value.trim(),
+      keyword: $("keyword").value.trim() || "말차"
+    };
+    if (!p.appId) { alert("applicationId를 입력하세요."); return; }
+    localStorage.setItem("diag_appId", p.appId);
+    localStorage.setItem("diag_accessKey", p.accessKey);
+    $("results").textContent = "";
+    for (const t of TESTS) {
+      await runOne(t, p);
+    }
+  };
+})();
+</script>
+</body>
+</html>
