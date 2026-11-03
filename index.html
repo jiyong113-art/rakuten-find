@@ -188,7 +188,16 @@
     if (minP) p.set("minPrice", minP);
     if (maxP) p.set("maxPrice", maxP);
     const res = await fetch(RAKUTEN_URL + "?" + p.toString());
-    if (!res.ok) throw new Error("라쿠텐 API 오류 " + res.status + " (키, 등록 웹사이트 주소, 호출 위치를 확인하세요)");
+    if (!res.ok) {
+      let detail = "";
+      try {
+        const j = await res.json();
+        detail = j.error_description || j.error || JSON.stringify(j);
+      } catch (e) {
+        detail = await res.text().catch(() => "");
+      }
+      throw new Error("라쿠텐 API 오류 " + res.status + ": " + String(detail).slice(0, 300));
+    }
     const data = await res.json();
     const seen = new Set();
     return (data.Items || []).map(e => e.Item || e).filter(it => {
